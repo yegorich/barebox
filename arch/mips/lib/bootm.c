@@ -11,43 +11,119 @@
 
 #include <asm/byteorder.h>
 
+#define LINUX_MAX_ENVS          256
+#define LINUX_MAX_ARGS          256
+
+static int	linux_argc;
+static char **	linux_argv;
+
+static char **	linux_env;
+static char *	linux_env_p;
+static int	linux_env_idx;
+
+static void linux_env_set (char *env_name, char *env_val)
+{
+        if (linux_env_idx < LINUX_MAX_ENVS - 1) {
+                linux_env[linux_env_idx] = linux_env_p;
+
+                strcpy (linux_env_p, env_name);
+                linux_env_p += strlen (env_name);
+
+                strcpy (linux_env_p, "=");
+                linux_env_p += 1;
+
+                strcpy (linux_env_p, env_val);
+                linux_env_p += strlen (env_val);
+
+                linux_env_p++;
+                linux_env[++linux_env_idx] = 0;
+        }
+}
+
+static void linux_params_init (ulong start, char *line)
+{
+	char *next, *quote, *argp;
+
+	linux_argc = 1;
+	linux_argv = (char **) start;
+	linux_argv[0] = 0;
+	argp = (char *) (linux_argv + LINUX_MAX_ARGS);
+
+	next = line;
+
+	while (line && *line && linux_argc < LINUX_MAX_ARGS) {
+		quote = strchr (line, '"');
+		next = strchr (line, ' ');
+
+		while (next != NULL && quote != NULL && quote < next) {
+			/* we found a left quote before the next blank
+			 * now we have to find the matching right quote
+			 */
+			next = strchr (quote + 1, '"');
+			if (next != NULL) {
+				quote = strchr (next + 1, '"');
+				next = strchr (next + 1, ' ');
+			}
+		}
+
+		if (next == NULL) {
+			next = line + strlen (line);
+		}
+
+		linux_argv[linux_argc] = argp;
+		memcpy (argp, line, next - line);
+		argp[next - line] = 0;
+
+		argp += next - line + 1;
+		linux_argc++;
+
+		if (*next)
+			next++;
+
+		line = next;
+	}
+
+	linux_env = (char **) (((ulong) argp + 15) & ~15);
+	linux_env[0] = 0;
+	linux_env_p = (char *) (linux_env + LINUX_MAX_ENVS);
+	linux_env_idx = 0;
+}
+
 void start_linux(void *adr, int swap, unsigned long initrd_address,
 		unsigned long initrd_size, void *oftree)
 {
-	void (*kernel)(int zero, int arch, void *params) = adr;
-	void *params = NULL;
-	int architecture;
+	void (*theKernel) (int, char **, char **, int);
+	struct memory_bank *mem;
+	char *commandline = "board=CARAMBOLA2 mtdparts=ar7240-nor0:256k(u-boot),256k(parameter),15744k(kernel),64k(hwdata),64k(ART) mem=64M rootfstype=squashfs,jffs2 noinitrd";
+	char env_buf[12];
 
-	if (oftree) {
-		pr_debug("booting kernel with devicetree\n");
-		params = oftree;
-	} else {
-		setup_tags(initrd_address, initrd_size, swap);
-		params = armlinux_get_bootparams();
-	}
-	architecture = armlinux_get_architecture();
+	for_each_memory_bank(mem)
+		printf("YY 0x%08x size %d\n", mem->start, mem->size);
+
+	printf("YY addr: 0x%08x\n", adr);
+
+	linux_params_init (0x80050000, commandline);
+
+	sprintf (env_buf, "%lu", mem->size);
+	linux_env_set ("memsize", env_buf);
+
+	sprintf (env_buf, "0x%08X", (uint) 0);
+	linux_env_set ("initrd_start", env_buf);
+
+	sprintf (env_buf, "0x%X", (uint) 0);
+	linux_env_set ("initrd_size", env_buf);
+
+	sprintf (env_buf, "0x%08X", (uint) 0);
+	linux_env_set ("flash_start", env_buf);
+
+	sprintf (env_buf, "0x%X", (uint) 0);
+	linux_env_set ("flash_size", env_buf);
+
+	theKernel =
+		(void (*)(int, char **, char **, int)) ntohl (adr);
 
 	shutdown_barebox();
-	if (swap) {
-		u32 reg;
-		__asm__ __volatile__("mrc p15, 0, %0, c1, c0" : "=r" (reg));
-		reg ^= CR_B; /* swap big-endian flag */
-		__asm__ __volatile__("mcr p15, 0, %0, c1, c0" :: "r" (reg));
-	}
-
-#ifdef CONFIG_THUMB2_BAREBOX
-	__asm__ __volatile__ (
-		"mov r0, #0\n"
-		"mov r1, %0\n"
-		"mov r2, %1\n"
-		"bx %2\n"
-		:
-		: "r" (architecture), "r" (params), "r" (kernel)
-		: "r0", "r1", "r2"
-	);
-#else
-	kernel(0, architecture, params);
-#endif
+	theKernel (linux_argc, linux_argv, linux_env, 64*1024*1024);
 }
 
 /*
@@ -98,6 +174,7 @@ static int __do_bootm_linux(struct image_data *data, unsigned long free_mem, int
 	unsigned long kernel;
 	unsigned long initrd_start = 0, initrd_size = 0, initrd_end = 0;
 	int ret;
+	struct image_header *hdr = &data->os->header;
 
 	kernel = data->os_res->start + data->os_entry;
 
@@ -136,7 +213,7 @@ static int __do_bootm_linux(struct image_data *data, unsigned long free_mem, int
 		printf("...\n");
 	}
 
-	start_linux((void *)kernel, swap, initrd_start, initrd_size, data->oftree);
+	start_linux((void *)hdr->ih_ep, swap, initrd_start, initrd_size, data->oftree);
 
 	restart_machine();
 
