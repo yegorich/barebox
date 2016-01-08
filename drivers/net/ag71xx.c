@@ -179,6 +179,25 @@
 #define RX_STATUS_OF		BIT(2)	/* Rx Overflow */
 #define RX_STATUS_BE		BIT(3)	/* Bus Error */
 
+#define MAC_CFG1_INIT   (MAC_CFG1_RXE | MAC_CFG1_TXE | \
+                         MAC_CFG1_SRX | MAC_CFG1_STX)
+
+#define FIFO_CFG0_INIT  (FIFO_CFG0_ALL << FIFO_CFG0_ENABLE_SHIFT)
+
+#define FIFO_CFG4_INIT  (FIFO_CFG4_DE | FIFO_CFG4_DV | FIFO_CFG4_FC | \
+                         FIFO_CFG4_CE | FIFO_CFG4_CR | FIFO_CFG4_LM | \
+                         FIFO_CFG4_LO | FIFO_CFG4_OK | FIFO_CFG4_MC | \
+                         FIFO_CFG4_BC | FIFO_CFG4_DR | FIFO_CFG4_LE | \
+                         FIFO_CFG4_CF | FIFO_CFG4_PF | FIFO_CFG4_UO | \
+                         FIFO_CFG4_VT)
+
+#define FIFO_CFG5_INIT  (FIFO_CFG5_DE | FIFO_CFG5_DV | FIFO_CFG5_FC | \
+                         FIFO_CFG5_CE | FIFO_CFG5_LO | FIFO_CFG5_OK | \
+                         FIFO_CFG5_MC | FIFO_CFG5_BC | FIFO_CFG5_DR | \
+                         FIFO_CFG5_CF | FIFO_CFG5_PF | FIFO_CFG5_VT | \
+                         FIFO_CFG5_LE | FIFO_CFG5_FT | FIFO_CFG5_16 | \
+                         FIFO_CFG5_17 | FIFO_CFG5_SF)
+
 /*
  * GMAC register macros
  */
@@ -298,7 +317,7 @@ static int ag71xx_ether_rx(struct eth_device *edev)
 	ag7240_desc_t *f;
 	unsigned int work_done;
 
-	for (work_done = 0; work_done < NO_OF_RX_FIFOS; work_done++) {
+	for (;;) {
 		unsigned int pktlen;
 
 		f = &priv->fifo_rx[priv->next_rx];
@@ -329,7 +348,7 @@ static int ag71xx_ether_rx(struct eth_device *edev)
 		ag71xx_wr(priv, AG71XX_REG_RX_CTRL, 1);
 	}
 
-	return work_done;
+	return 0;
 }
 
 static int ag71xx_ether_send(struct eth_device *edev, void *packet, int length)
@@ -480,10 +499,10 @@ static int ag71xx_probe(struct device_d *dev)
 	mdelay(100);
 
 	ag71xx_wr(priv, AG71XX_REG_MAC_CFG1, (MAC_CFG1_SR | MAC_CFG1_TX_RST | MAC_CFG1_RX_RST));
-	ag71xx_wr(priv, AG71XX_REG_MAC_CFG1, (MAC_CFG1_RXE | MAC_CFG1_TXE));
+	ag71xx_wr(priv, AG71XX_REG_MAC_CFG1, MAC_CFG1_INIT);
 
 	rd = ag71xx_rr(priv, AG71XX_REG_MAC_CFG2);
-	rd |= (MAC_CFG2_PAD_CRC_EN | MAC_CFG2_LEN_CHECK | MAC_CFG2_IF_10_100);
+	rd |= (MAC_CFG2_PAD_CRC_EN | MAC_CFG2_LEN_CHECK | MAC_CFG2_IF_10_100 | MAC_CFG2_FDX);
 	ag71xx_wr(priv, AG71XX_REG_MAC_CFG2, rd);
 
 	/* config FIFOs */
@@ -494,10 +513,14 @@ static int ag71xx_probe(struct device_d *dev)
 	ag71xx_wr(priv, AG71XX_REG_FIFO_CFG1, 0x10ffff);
 	ag71xx_wr(priv, AG71XX_REG_FIFO_CFG2, 0xAAA0555);
 
-	ag71xx_wr(priv, AG71XX_REG_FIFO_CFG4, 0x3ffff);
+	ag71xx_wr(priv, AG71XX_REG_FIFO_CFG4, FIFO_CFG4_INIT);
 	/* bit 19 should be set to 1 for GE0 */
-	ag71xx_wr(priv, AG71XX_REG_FIFO_CFG5, (0x66b82) | (1 << 19));
-	ag71xx_wr(priv, AG71XX_REG_FIFO_CFG3, 0x1f00140);
+	ag71xx_wr(priv, AG71XX_REG_FIFO_CFG5, FIFO_CFG5_INIT);
+	ag71xx_wr(priv, AG71XX_REG_FIFO_CFG3, 0x008001ff);
+
+	rd = __raw_readl((char *)KSEG1ADDR(AR71XX_PLL_BASE + AR933X_ETH_XMII_CONTROL_REG));
+	rd = 0x0101;
+	__raw_writel(rd, (char *)KSEG1ADDR(AR71XX_PLL_BASE + AR933X_ETH_XMII_CONTROL_REG));
 
 	priv->rx_buffer = dma_alloc_coherent(NO_OF_TX_FIFOS * MAX_RBUFF_SZ, DMA_ADDRESS_BROKEN);
 	priv->fifo_tx = dma_alloc_coherent(NO_OF_TX_FIFOS * sizeof(ag7240_desc_t), DMA_ADDRESS_BROKEN);
