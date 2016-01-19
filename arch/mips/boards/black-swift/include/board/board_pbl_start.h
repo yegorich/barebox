@@ -35,13 +35,13 @@
 	pbl_ar9331_pll
 	pbl_ar9331_ddr2_config
 
+skip_pll_ram_config:
 	/* Initialize caches... */
 	mips_cache_reset
 
 	/* ... and enable them */
 	dcache_enable
 
-skip_pll_ram_config:
 	pbl_ar9331_uart_enable
 	debug_ll_ar9331_init
 	mips_nmon
