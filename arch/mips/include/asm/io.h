@@ -11,13 +11,20 @@
 #define __ASM_MIPS_IO_H
 
 #include <linux/compiler.h>
+#include <asm/posix_types.h>
 #include <asm/types.h>
+#include <asm/string.h>
 #include <asm/byteorder.h>
 
 void dma_flush_range(unsigned long, unsigned long);
 void dma_inv_range(unsigned long, unsigned long);
 
 #define	IO_SPACE_LIMIT	0
+
+static inline void memcpy_fromio(void *dst, const volatile void __iomem *src, int count)
+{
+        memcpy(dst, (void __force *) src, count);
+}
 
 /*****************************************************************************/
 /*
